@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+.DS_Store
+val_predictions.json
+val_score.json
+predictions.json
+score.json
+models/*.pth
+public/
+public.zip
