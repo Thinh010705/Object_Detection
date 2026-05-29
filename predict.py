@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 from PIL import Image
 
-from models.detector import TinyGridDetector, decode_predictions
+from models.detector import build_detector, decode_predictions
 from utils.dataset import DEFAULT_CLASSES, pil_to_normalized_tensor
 
 
@@ -18,7 +18,7 @@ def parse_args():
     parser.add_argument("--image_dir", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--checkpoint", default="./models/best.pth")
-    parser.add_argument("--conf_threshold", type=float, default=0.25)
+    parser.add_argument("--conf_threshold", type=float, default=0.05)
     parser.add_argument("--nms_threshold", type=float, default=0.5)
     parser.add_argument("--max_detections", type=int, default=100)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -42,7 +42,15 @@ def load_model(checkpoint_path, device):
     image_size = int(ckpt.get("image_size", 416))
     grid_size = int(ckpt.get("grid_size", 13))
     model_width = int(ckpt.get("model_width", 24))
-    model = TinyGridDetector(num_classes=len(classes), grid_size=grid_size, width=model_width).to(device)
+    backbone = ckpt.get("backbone", "tiny")
+    model = build_detector(
+        backbone,
+        num_classes=len(classes),
+        grid_size=grid_size,
+        model_width=model_width,
+        pretrained_backbone=False,
+        freeze_backbone=bool(ckpt.get("freeze_backbone", False)),
+    ).to(device)
     model.load_state_dict(ckpt["model"])
     model.eval()
     return model, classes, image_size

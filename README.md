@@ -1,6 +1,6 @@
 # Object Detection Submission
 
-This submission implements a small object detector from scratch in PyTorch. It does not use YOLO, Detectron2, MMDetection, Faster R-CNN, SSD, or torchvision detection models.
+This submission implements a custom object detector in PyTorch. It does not use YOLO, Detectron2, MMDetection, Faster R-CNN, SSD, or torchvision detection models.
 
 ## Method
 
@@ -8,7 +8,7 @@ This submission implements a small object detector from scratch in PyTorch. It d
 - Resize to a square input size and ImageNet-style pixel normalization.
 - Multi-object handling by assigning each object to the grid cell containing its center.
 - Augmentations: horizontal flip, random crop, and color jitter.
-- CNN backbone implemented with basic convolution, batch normalization, and SiLU layers.
+- CNN backbone implemented with basic convolution layers, or an optional ImageNet-pretrained ResNet50 feature extractor.
 - Anchor-free grid detection head predicting objectness, class logits, and bounding boxes.
 - Loss: BCE objectness, Cross Entropy classification, Smooth L1 + GIoU box regression.
 - Inference: confidence thresholding, per-class NMS implemented in `utils/box_ops.py`, and output boxes in original image coordinates.
@@ -49,6 +49,36 @@ The best model is saved to:
 ./models/best.pth
 ```
 
+## Stronger Allowed Backbone
+
+If ImageNet-pretrained feature extractors are allowed, train the same custom
+grid detector with a ResNet50 backbone:
+
+```bash
+python train.py \
+  --train_data ./public/annotations/train.json \
+  --val_data ./public/annotations/val.json \
+  --image_dir ./public/train/images \
+  --val_image_dir ./public/val/images \
+  --checkpoint_dir ./models/ \
+  --backbone resnet50 \
+  --image_size 512 \
+  --grid_size 16 \
+  --model_width 64 \
+  --epochs 80 \
+  --batch_size 4 \
+  --lr 1e-4 \
+  --score_every 1
+```
+
+This still uses the project detection head, loss, decoder, and NMS. The best
+checkpoint is selected by validation mAP@0.5 and saved with its score:
+
+```text
+./models/best.pth
+./models/best_val_score.json
+```
+
 Useful optional arguments:
 
 ```bash
@@ -62,7 +92,8 @@ Required command:
 ```bash
 python predict.py \
   --image_dir /path/to/images \
-  --output predictions.json
+  --output predictions.json \
+  --conf_threshold 0.05
 ```
 
 By default, `predict.py` loads `./models/best.pth`. To use another checkpoint:
@@ -73,6 +104,9 @@ python predict.py \
   --output predictions.json \
   --checkpoint ./models/best.pth
 ```
+
+The default confidence threshold is `0.05`, which improved validation mAP@0.5
+for the current checkpoint compared with the original `0.25` threshold.
 
 The output JSON format is:
 
@@ -100,7 +134,8 @@ After producing predictions on the validation images:
 ```bash
 python predict.py \
   --image_dir ./public/val/images \
-  --output val_predictions.json
+  --output val_predictions.json \
+  --conf_threshold 0.05
 
 python public/tools/evaluate_predictions.py \
   --ground_truth public/annotations/val.json \

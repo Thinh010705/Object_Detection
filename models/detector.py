@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torchvision.models import ResNet50_Weights, resnet50
 
 from utils.box_ops import cxcywh_to_xyxy, generalized_box_iou, nms
 
@@ -45,6 +46,53 @@ class TinyGridDetector(nn.Module):
         feat = F.adaptive_avg_pool2d(feat, (self.grid_size, self.grid_size))
         pred = self.head(feat)
         return pred.permute(0, 2, 3, 1).contiguous()
+
+
+class ResNetGridDetector(nn.Module):
+    def __init__(self, num_classes=5, grid_size=16, head_width=256, pretrained=True, train_backbone=True):
+        super().__init__()
+        self.num_classes = num_classes
+        self.grid_size = grid_size
+
+        weights = ResNet50_Weights.IMAGENET1K_V1 if pretrained else None
+        base = resnet50(weights=weights)
+        self.backbone = nn.Sequential(*list(base.children())[:-2])
+        if not train_backbone:
+            for param in self.backbone.parameters():
+                param.requires_grad = False
+
+        self.head = nn.Sequential(
+            ConvBNAct(2048, head_width, 1),
+            ConvBNAct(head_width, head_width, 1),
+            nn.Conv2d(head_width, 1 + num_classes + 4, kernel_size=1),
+        )
+
+    def forward(self, x):
+        feat = self.backbone(x)
+        feat = F.adaptive_avg_pool2d(feat, (self.grid_size, self.grid_size))
+        pred = self.head(feat)
+        return pred.permute(0, 2, 3, 1).contiguous()
+
+
+def build_detector(
+    name,
+    num_classes,
+    grid_size,
+    model_width=24,
+    pretrained_backbone=True,
+    freeze_backbone=False,
+):
+    if name == "tiny":
+        return TinyGridDetector(num_classes=num_classes, grid_size=grid_size, width=model_width)
+    if name == "resnet50":
+        return ResNetGridDetector(
+            num_classes=num_classes,
+            grid_size=grid_size,
+            head_width=max(128, model_width * 8),
+            pretrained=pretrained_backbone,
+            train_backbone=not freeze_backbone,
+        )
+    raise ValueError(f"Unknown detector backbone: {name}")
 
 
 def detection_loss(pred, targets, num_classes, lambda_box=5.0, lambda_obj=1.0, lambda_noobj=0.35, lambda_cls=1.0):
