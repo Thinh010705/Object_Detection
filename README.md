@@ -79,6 +79,25 @@ checkpoint is selected by validation mAP@0.5 and saved with its score:
 ./models/best_val_score.json
 ```
 
+Continue training from a saved checkpoint:
+
+```bash
+python train.py \
+  --train_data ./public/annotations/train.json \
+  --val_data ./public/annotations/val.json \
+  --image_dir ./public/train/images \
+  --val_image_dir ./public/val/images \
+  --checkpoint_dir ./models/ \
+  --resume ./models/best.pth \
+  --epochs 40 \
+  --lr 5e-5 \
+  --score_every 1
+```
+
+When resuming, model settings such as backbone, image size, grid size, and
+model width are restored from the checkpoint. Use `--reset_optimizer` if you
+want to load model weights but start a fresh optimizer and scheduler.
+
 Useful optional arguments:
 
 ```bash

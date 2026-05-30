@@ -20,6 +20,8 @@ def parse_args():
     parser.add_argument("--image_dir", required=True)
     parser.add_argument("--val_image_dir", required=True)
     parser.add_argument("--checkpoint_dir", default="./models/")
+    parser.add_argument("--resume", help="Path to a checkpoint to continue training from.")
+    parser.add_argument("--reset_optimizer", action="store_true", help="Resume model weights but start a fresh optimizer/scheduler.")
     parser.add_argument("--epochs", type=int, default=40)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--image_size", type=int, default=416)
@@ -90,6 +92,13 @@ def load_evaluator():
     return module
 
 
+def move_optimizer_state(optimizer, device):
+    for state in optimizer.state.values():
+        for key, value in state.items():
+            if torch.is_tensor(value):
+                state[key] = value.to(device)
+
+
 @torch.no_grad()
 def evaluate_map(model, loader, device, classes, val_data, args):
     model.eval()
@@ -138,6 +147,15 @@ def main():
     args = parse_args()
     set_seed(args.seed)
     Path(args.checkpoint_dir).mkdir(parents=True, exist_ok=True)
+
+    resume_checkpoint = None
+    if args.resume:
+        resume_checkpoint = torch.load(args.resume, map_location="cpu")
+        for key in ("image_size", "grid_size", "backbone", "model_width", "freeze_backbone"):
+            if key in resume_checkpoint:
+                setattr(args, key, resume_checkpoint[key])
+        if "pretrained_backbone" in resume_checkpoint:
+            args.no_pretrained_backbone = not bool(resume_checkpoint["pretrained_backbone"])
 
     train_ds = DetectionDataset(
         args.train_data,
@@ -191,12 +209,27 @@ def main():
 
     best_map = -1.0
     best_loss = float("inf")
+    start_epoch = 1
     best_path = os.path.join(args.checkpoint_dir, "best.pth")
     last_path = os.path.join(args.checkpoint_dir, "last.pth")
     best_score_path = os.path.join(args.checkpoint_dir, "best_val_score.json")
     best_pred_path = os.path.join(args.checkpoint_dir, "best_val_predictions.json")
 
-    for epoch in range(1, args.epochs + 1):
+    if resume_checkpoint is not None:
+        model.load_state_dict(resume_checkpoint["model"])
+        if not args.reset_optimizer and "optimizer" in resume_checkpoint:
+            optimizer.load_state_dict(resume_checkpoint["optimizer"])
+            move_optimizer_state(optimizer, device)
+        if not args.reset_optimizer and "scheduler" in resume_checkpoint:
+            scheduler.load_state_dict(resume_checkpoint["scheduler"])
+        start_epoch = int(resume_checkpoint.get("epoch", 0)) + 1
+        best_map = float(resume_checkpoint.get("mAP@0.5", -1.0))
+        best_loss = float(resume_checkpoint.get("val_loss", float("inf")))
+        print(f"resumed from {args.resume} at epoch {start_epoch - 1}")
+        print(f"continuing for {args.epochs} more epoch(s)")
+
+    end_epoch = start_epoch + args.epochs
+    for epoch in range(start_epoch, end_epoch):
         train_metrics = run_epoch(model, train_loader, optimizer, device, len(train_ds.classes), train=True)
         val_metrics = run_epoch(model, val_loader, optimizer, device, len(train_ds.classes), train=False)
         scheduler.step()
@@ -215,6 +248,8 @@ def main():
             "conf_threshold": args.conf_threshold,
             "nms_threshold": args.nms_threshold,
             "max_detections": args.max_detections,
+            "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(),
         }
 
         map_metrics = None
@@ -239,7 +274,7 @@ def main():
         if map_metrics:
             score_text = f" mAP@0.5={map_metrics['mAP@0.5']:.6f} points={map_metrics['performance_points']}"
         print(
-            f"epoch {epoch:03d}/{args.epochs} "
+            f"epoch {epoch:03d}/{end_epoch - 1} "
             f"train_loss={train_metrics['loss']:.4f} val_loss={val_metrics['loss']:.4f} "
             f"obj={val_metrics['obj']:.4f} cls={val_metrics['cls']:.4f} box={val_metrics['box']:.4f}"
             f"{score_text}"
