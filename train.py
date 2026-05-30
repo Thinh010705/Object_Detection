@@ -26,7 +26,7 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--image_size", type=int, default=416)
     parser.add_argument("--grid_size", type=int, default=13)
-    parser.add_argument("--backbone", choices=["tiny", "resnet50"], default="tiny")
+    parser.add_argument("--backbone", choices=["tiny", "resnet50", "resnet50_fpn"], default="tiny")
     parser.add_argument("--model_width", type=int, default=24)
     parser.add_argument("--no_pretrained_backbone", action="store_true")
     parser.add_argument("--freeze_backbone", action="store_true")

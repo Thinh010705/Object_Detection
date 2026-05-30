@@ -74,6 +74,66 @@ class ResNetGridDetector(nn.Module):
         return pred.permute(0, 2, 3, 1).contiguous()
 
 
+class ResNetFPNGridDetector(nn.Module):
+    def __init__(self, num_classes=5, grid_size=20, fpn_width=256, pretrained=True, train_backbone=True):
+        super().__init__()
+        self.num_classes = num_classes
+        self.grid_size = grid_size
+
+        weights = ResNet50_Weights.IMAGENET1K_V1 if pretrained else None
+        base = resnet50(weights=weights)
+        self.stem = nn.Sequential(base.conv1, base.bn1, base.relu, base.maxpool)
+        self.layer1 = base.layer1
+        self.layer2 = base.layer2
+        self.layer3 = base.layer3
+        self.layer4 = base.layer4
+
+        if not train_backbone:
+            for module in (self.stem, self.layer1, self.layer2, self.layer3, self.layer4):
+                for param in module.parameters():
+                    param.requires_grad = False
+
+        self.lateral3 = nn.Conv2d(512, fpn_width, kernel_size=1)
+        self.lateral4 = nn.Conv2d(1024, fpn_width, kernel_size=1)
+        self.lateral5 = nn.Conv2d(2048, fpn_width, kernel_size=1)
+        self.smooth3 = ConvBNAct(fpn_width, fpn_width, 1)
+        self.smooth4 = ConvBNAct(fpn_width, fpn_width, 1)
+        self.smooth5 = ConvBNAct(fpn_width, fpn_width, 1)
+
+        self.head = nn.Sequential(
+            ConvBNAct(fpn_width * 3, fpn_width * 2, 1),
+            ConvBNAct(fpn_width * 2, fpn_width, 1),
+            nn.Conv2d(fpn_width, 1 + num_classes + 4, kernel_size=1),
+        )
+
+    def forward(self, x):
+        x = self.stem(x)
+        x = self.layer1(x)
+        c3 = self.layer2(x)
+        c4 = self.layer3(c3)
+        c5 = self.layer4(c4)
+
+        p5 = self.lateral5(c5)
+        p4 = self.lateral4(c4) + F.interpolate(p5, size=c4.shape[-2:], mode="nearest")
+        p3 = self.lateral3(c3) + F.interpolate(p4, size=c3.shape[-2:], mode="nearest")
+
+        p5 = self.smooth5(p5)
+        p4 = self.smooth4(p4)
+        p3 = self.smooth3(p3)
+
+        target_size = (self.grid_size, self.grid_size)
+        feat = torch.cat(
+            (
+                F.adaptive_avg_pool2d(p3, target_size),
+                F.adaptive_avg_pool2d(p4, target_size),
+                F.adaptive_avg_pool2d(p5, target_size),
+            ),
+            dim=1,
+        )
+        pred = self.head(feat)
+        return pred.permute(0, 2, 3, 1).contiguous()
+
+
 def build_detector(
     name,
     num_classes,
@@ -89,6 +149,14 @@ def build_detector(
             num_classes=num_classes,
             grid_size=grid_size,
             head_width=max(128, model_width * 8),
+            pretrained=pretrained_backbone,
+            train_backbone=not freeze_backbone,
+        )
+    if name == "resnet50_fpn":
+        return ResNetFPNGridDetector(
+            num_classes=num_classes,
+            grid_size=grid_size,
+            fpn_width=max(128, model_width * 4),
             pretrained=pretrained_backbone,
             train_backbone=not freeze_backbone,
         )

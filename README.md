@@ -9,6 +9,7 @@ This submission implements a custom object detector in PyTorch. It does not use 
 - Multi-object handling by assigning each object to the grid cell containing its center.
 - Augmentations: horizontal flip, random crop, and color jitter.
 - CNN backbone implemented with basic convolution layers, or an optional ImageNet-pretrained ResNet50 feature extractor.
+- Optional custom FPN-style multi-scale feature fusion over ResNet feature maps.
 - Anchor-free grid detection head predicting objectness, class logits, and bounding boxes.
 - Loss: BCE objectness, Cross Entropy classification, Smooth L1 + GIoU box regression.
 - Inference: confidence thresholding, per-class NMS implemented in `utils/box_ops.py`, and output boxes in original image coordinates.
@@ -70,6 +71,29 @@ python train.py \
   --lr 1e-4 \
   --score_every 1
 ```
+
+For the stronger custom multi-scale head, start a new run with `resnet50_fpn`:
+
+```bash
+python train.py \
+  --train_data ./public/annotations/train.json \
+  --val_data ./public/annotations/val.json \
+  --image_dir ./public/train/images \
+  --val_image_dir ./public/val/images \
+  --checkpoint_dir ./models_fpn/ \
+  --backbone resnet50_fpn \
+  --image_size 640 \
+  --grid_size 20 \
+  --model_width 96 \
+  --epochs 80 \
+  --batch_size 2 \
+  --lr 1e-4 \
+  --score_every 1
+```
+
+This uses a custom FPN-style fusion head, not a torchvision detection model.
+Do not resume a `resnet50` checkpoint into `resnet50_fpn`; the architecture is
+different. Resume only from checkpoints created with the same backbone.
 
 This still uses the project detection head, loss, decoder, and NMS. The best
 checkpoint is selected by validation mAP@0.5 and saved with its score:
